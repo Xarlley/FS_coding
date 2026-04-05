@@ -56,7 +56,7 @@ class Spike2TimeFunc(torch.autograd.Function):
         # define Gaussian kernel for error assignment
         sigma = T//D
         length = min(sigma*6+1, 2*(T//2)+1)
-        kernel = signal.gaussian(length, std=sigma) 
+        kernel = signal.windows.gaussian(length, std=sigma)
         # Nx1xW
         kernel = torch.from_numpy(kernel).float().reshape(1,1,-1).repeat(output_times.shape[1],1,1).to(device)
         

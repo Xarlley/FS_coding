@@ -1,5 +1,5 @@
 import time, os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # import GPUtil
 # # Get a list of available GPUs
 # gpus = GPUtil.getGPUs()
@@ -13,7 +13,12 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 
 # # Set CUDA device to the selected GPU
 # os.environ["CUDA_VISIBLE_DEVICES"] = str(chosen_gpu.id)
-
+import numpy as np
+# 为兼容旧版代码，手动补回被 numpy 2.x 移除的内置类型别名
+np.int = int
+np.float = float
+np.bool = np.bool_  # 关键修改：使用 numpy 内部的布尔类型，而不是 python 内置的 bool
+np.object = object
 
 import torch
 import torch.optim as optim
