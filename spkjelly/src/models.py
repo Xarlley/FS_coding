@@ -18,7 +18,7 @@ def weight_init_xavier_uniform(m):
                 nn.init.xavier_uniform_(param)
 
 
-def SpikeConv(neuron_params, neuron_type, in_channels, out_channels, kernel_size=3, padding=1, stride=1, bias=False, BN=False, backend='cupy', step_mode='m'):
+def SpikeConv(neuron_params, neuron_type, in_channels, out_channels, kernel_size=3, padding=1, stride=1, bias=False, BN=False, backend='torch', step_mode='m'):
     if neuron_type == 'pculif':
         neuron = ParametricCuLIFNode(tau_mem= neuron_params['tau_m'], tau_syn = neuron_params['tau_s'], v_threshold=neuron_params['theta'],  \
                     surrogate_function=MySoftSign(), \
@@ -45,7 +45,7 @@ def SpikeConv(neuron_params, neuron_type, in_channels, out_channels, kernel_size
     return spikeconv
 
 
-def SpikePool(neuron_params, neuron_type, kernel_size=2, backend='cupy', step_mode='m'):
+def SpikePool(neuron_params, neuron_type, kernel_size=2, backend='torch', step_mode='m'):
     if neuron_type == 'pculif':
         neuron = ParametricCuLIFNode(tau_mem= neuron_params['tau_m'], tau_syn = neuron_params['tau_s'], v_threshold=neuron_params['theta'],  \
                     surrogate_function=MySoftSign(), \
@@ -64,7 +64,7 @@ def SpikePool(neuron_params, neuron_type, kernel_size=2, backend='cupy', step_mo
 
 def SpikeFC(neuron_params, neuron_type, input_size, out_size, bias=False, 
             recurrent=False, BN=False, dropout=None, 
-            backend='cupy', step_mode='m', decay_mode='m', store_v_seq=False, store_I_seq=False):
+            backend='torch', step_mode='m', decay_mode='m', store_v_seq=False, store_I_seq=False):
     if recurrent:
         backend = 'torch'
         neuron_step_mode = 's'

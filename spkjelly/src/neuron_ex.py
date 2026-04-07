@@ -25,6 +25,9 @@ class CuLIFNode(neuron.BaseNode):
         self.register_memory('I', 0.)
         self.register_memory('h', 0.)
         self.store_I_seq = store_I_seq
+        
+        # if the neuron has fired
+        self.register_memory('has_fired', 0.)
 
     
     def I_float_to_tensor(self, x: torch.Tensor):
@@ -36,6 +39,10 @@ class CuLIFNode(neuron.BaseNode):
         if isinstance(self.I, float):
             h_init = self.h
             self.h = torch.full_like(x.data, h_init) # input_size, fill_value
+    
+    def has_fired_float_to_tensor(self, x: torch.Tensor):
+        if isinstance(self.has_fired, float):
+            self.has_fired = torch.zeros_like(x.data)
 
 
     @property
@@ -198,129 +205,66 @@ class CuLIFNode(neuron.BaseNode):
 
 
     def single_step_forward(self, x: torch.Tensor):
-        if self.training:
-            self.I_float_to_tensor(x)
-            self.h_float_to_tensor(x)
-            self.v_float_to_tensor(x)
-            self.neuronal_charge(x)
-            self.h = self.v.clone().detach()
-            spike = self.neuronal_fire()
-            self.neuronal_reset(spike)
-            return spike
-        else:
-            self.v_float_to_tensor(x)
-            self.I_float_to_tensor(x)
-            self.h_float_to_tensor(x)
-            if self.v_reset is None:
-                spike, self.v, self.I, self.h = self.jit_eval_single_step_forward_soft_reset_decay_input(x, self.v, self.I,
-                                                                                            self.v_threshold, self.decay_mem, self.decay_syn)
-            else:
-                spike, self.v, self.I, self.h = self.jit_eval_single_step_forward_hard_reset_decay_input(x, self.v, self.I,
-                                                                                            self.v_threshold,
-                                                                                            self.v_reset, self.decay_mem, self.decay_syn)
-            return spike
+        self.I_float_to_tensor(x)
+        self.h_float_to_tensor(x)
+        self.v_float_to_tensor(x)
+        self.has_fired_float_to_tensor(x) # [新增] 初始化拦截状态
 
-    def multi_step_forward(self, x_seq: torch.Tensor):
+        # 1. 正常的膜电位充电
+        self.I = self.decay_syn * self.I + x
+        self.v = self.v + self.I
         
         if self.training:
-            if self.backend == 'torch':
-                # return super().multi_step_forward(x_seq)
-                ## modified with store_I_seq
-                T = x_seq.shape[0]
-                y_seq = []
-                if self.store_v_seq:
-                    v_seq = []
-                    h_seq = []
-                if self.store_I_seq:
-                    I_seq = []
-                for t in range(T):
-                    y = self.single_step_forward(x_seq[t])
-                    y_seq.append(y)
-                    if self.store_v_seq:
-                        v_seq.append(self.v)
-                        h_seq.append(self.h)
-                    if self.store_I_seq:
-                        I_seq.append(self.I)
-
-                if self.store_v_seq:
-                    self.v_seq = torch.stack(v_seq)
-                    self.h_seq = torch.stack(h_seq)
-                if self.store_I_seq:
-                    self.I_seq = torch.stack(I_seq)
-
-                return torch.stack(y_seq)
-            
-            elif self.backend == 'cupy':
-
-                hard_reset = self.v_reset is not None
-                if x_seq.dtype == torch.float:
-                    dtype = 'float'
-                elif x_seq.dtype == torch.half:
-                    dtype = 'half2'
-                else:
-                    raise NotImplementedError(x_seq.dtype)
-
-                if self.forward_kernel is None or not self.forward_kernel.check_attributes(hard_reset=hard_reset, dtype=dtype):
-                    self.forward_kernel = CuLIFNodeFPTTKernel(hard_reset=hard_reset, dtype=dtype)
-
-                if self.backward_kernel is None or not self.backward_kernel.check_attributes(
-                        surrogate_function=self.surrogate_function.cuda_codes, hard_reset=hard_reset,
-                        detach_reset=self.detach_reset, dtype=dtype):
-                    self.backward_kernel = CuLIFNodeBPTTKernel(surrogate_function=self.surrogate_function.cuda_codes, hard_reset=hard_reset, detach_reset=self.detach_reset, dtype=dtype)
-
-                self.v_float_to_tensor(x_seq[0])
-                self.I_float_to_tensor(x_seq[0])
-
-                # x_seq, v_init, I_init, v_th, v_reset, mem_decay, syn_decay, forward_kernel, backward_kernel
-                spike_seq, v_seq, I_seq, h_seq = CuLIFNodeATGF.apply(x_seq.flatten(1), self.v.flatten(0), self.I.flatten(0),
-                                                                     self.v_threshold, self.v_reset, self.decay_mem, self.decay_syn, ######
-                                                                     self.forward_kernel,
-                                                                     self.backward_kernel)
-
-                spike_seq = spike_seq.reshape(x_seq.shape)
-                v_seq = v_seq.reshape(x_seq.shape)
-                I_seq = I_seq.reshape(x_seq.shape)
-                h_seq = h_seq.reshape(x_seq.shape)
-
-                if self.store_v_seq:
-                    self.v_seq = v_seq
-                    self.h_seq = h_seq
-                if self.store_I_seq:
-                    self.I_seq = I_seq
-
-                self.v = v_seq[-1].clone()
-                self.I = I_seq[-1].clone()
-
-                return spike_seq
-            else:
-                raise ValueError(self.backend)
-
+            self.h = self.v.clone().detach()
         else:
-            self.v_float_to_tensor(x_seq[0])
-            self.I_float_to_tensor(x_seq[0])
+            self.h = self.v.clone()
 
-            if self.v_reset is None:
+        # 2. 计算原始的脉冲发放与替代梯度
+        raw_spike = self.neuronal_fire()
+        
+        # 3. [新增] TTFS 核心拦截逻辑：只有之前没发过，这次才算数
+        actual_spike = raw_spike * (1. - self.has_fired.detach())
+        
+        # 4. [新增] 更新拦截状态：一旦发放，变为 1
+        self.has_fired = (self.has_fired + actual_spike).detach().clamp_(0., 1.)
+        
+        # 5. [新增] 电压抑制：一旦发放，将膜电位钳制在极低值（-1e4），彻底阻断后续电荷积累
+        self.v = self.v * (1. - self.has_fired.detach()) - 1e4 * self.has_fired.detach()
+
+        return actual_spike
+
+    def multi_step_forward(self, x_seq: torch.Tensor):
+        if self.backend == 'torch':
+            T = x_seq.shape[0]
+            y_seq = []
+            if self.store_v_seq:
+                v_seq = []
+                h_seq = []
+            if self.store_I_seq:
+                I_seq = []
+            
+            # 无论是训练还是推理，强制使用时间循环，以保证 TTFS 状态被正确更新
+            for t in range(T):
+                y = self.single_step_forward(x_seq[t])
+                y_seq.append(y)
                 if self.store_v_seq:
-                    spike_seq, self.v, self.I, self.v_seq, self.h_seq = self.jit_eval_multi_step_forward_soft_reset_decay_input_with_v_seq(
-                        x_seq, self.v, self.I, self.v_threshold, self.decay_mem, self.decay_syn)
-                elif self.store_I_seq:
-                    spike_seq, self.v, self.I, self.v_seq, self.h_seq, self.I_seq = self.jit_eval_multi_step_forward_soft_reset_decay_input_with_v_I_seq(
-                        x_seq, self.v,  self.I, self.v_threshold, self.decay_mem, self.decay_syn)
-                else:
-                    spike_seq, self.v, self.I = self.jit_eval_multi_step_forward_soft_reset_decay_input(x_seq, self.v, self.I,
-                                                                                                self.v_threshold,
-                                                                                                self.decay_mem, self.decay_syn)
-            else:
+                    v_seq.append(self.v)
+                    h_seq.append(self.h)
                 if self.store_I_seq:
-                    spike_seq, self.v, self.I, self.v_seq, self.h_seq, self.I_seq = self.jit_eval_multi_step_forward_hard_reset_decay_input_with_v_I_seq(
-                        x_seq, self.v, self.I, self.v_threshold, self.v_reset, self.decay_mem, self.decay_syn)
-                elif self.store_v_seq:
-                    spike_seq, self.v, self.I, self.v_seq, self.h_seq = self.jit_eval_multi_step_forward_hard_reset_decay_input_with_v_seq(
-                        x_seq, self.v, self.I, self.v_threshold, self.v_reset, self.decay_mem, self.decay_syn)
-                else:
-                    spike_seq, self.v, self.I = self.jit_eval_multi_step_forward_hard_reset_decay_input(x_seq, self.v, self.I, self.v_threshold,  self.v_reset,
-                                                                                         self.decay_mem, self.decay_syn)
-            return spike_seq
+                    I_seq.append(self.I)
+
+            if self.store_v_seq:
+                self.v_seq = torch.stack(v_seq)
+                self.h_seq = torch.stack(h_seq)
+            if self.store_I_seq:
+                self.I_seq = torch.stack(I_seq)
+
+            return torch.stack(y_seq)
+            
+        elif self.backend == 'cupy':
+            raise RuntimeError("TTFS 强制要求使用 'torch' backend。请检查 models.py。")
+        else:
+            raise ValueError(self.backend)
 
 
 

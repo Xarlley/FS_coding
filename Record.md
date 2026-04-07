@@ -55,3 +55,15 @@ python test.py \
 `snn_inference.cu`是一个与python实现完全等价的CUDA实现，对训练集的推理准确率达到99.91%。
 
 需要使用`export_dataset.py`和`export_weights.py`导出数据集和权重，以供CUDA程序加载使用。
+
+## First-Spike -> Time-to-First-Spike
+
+原项目是一个FS编码的脉冲神经网络，但我想要TTFS编码。
+
+`spkjelly/src/models.py`, `spkjelly/src/neuron_ex.py`, `configs/culif_dvsgesture.yaml`经过修改，现在已经不是原仓库的TS编码，变成了严格的TTFS编码。TTFS编码要求所有神经元在整个时间窗口上仅能发放一次脉冲。
+
+经过70 epoch训练，严格TTFS版本的SNN在训练集上的准确率达到94.81%（pytorch实现），在测试集上达到84.09%(pytorch实现)。
+
+再次使用`export_weights.py`导出权重。
+
+使用CUDA实现严格TTFS版的脉冲神经网络，即`snn_inference_TTFS.cu`，准确率达到96.29%（cuda实现）。
