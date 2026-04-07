@@ -49,3 +49,9 @@ python test.py \
 --load_pt_file '../models/dvsgesture_fs0.1_tau60_culif.pt' \
 --best_model
 ```
+
+## CUDA baseline
+
+`snn_inference.cu`是一个与python实现完全等价的CUDA实现，对训练集的推理准确率达到99.91%。
+
+需要使用`export_dataset.py`和`export_weights.py`导出数据集和权重，以供CUDA程序加载使用。

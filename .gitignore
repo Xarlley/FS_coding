@@ -4,3 +4,6 @@ summary/
 data_io/make_hdf5.py
 __pycache__/
 **/__pycache__
+cuda_assets/
+datasets/
+snn_inference
