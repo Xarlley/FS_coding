@@ -19,11 +19,11 @@ network:
 neuron_params1:
     tau_m:    5
     tau_s:    5
-    theta:    0.5
+    theta:    5.0
 neuron_params2:
     tau_m:    60
     tau_s:    60
-    theta:    1.0
+    theta:    10.0
 loss:
     loss_mode:   'first_time' #'first_time' ' #'firing_rate'
     FS:

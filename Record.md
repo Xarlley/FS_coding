@@ -67,3 +67,17 @@ python test.py \
 再次使用`export_weights.py`导出权重。
 
 使用CUDA实现严格TTFS版的脉冲神经网络，即`snn_inference_TTFS.cu`，准确率达到96.29%（cuda实现）。
+
+## CUDA TTFS
+
+现在已经可以实现CUDA VD-TTFS算法的正确推理了。
+
+`extract_single_sample.py`实现了仅提取出数据集中单个样例和label。
+
+`snn_inference_single.cu`实现了仅用VD-TTFS推理单个样例。
+
+`snn_inference_TTFS_layer.cu`实现了仅将step-by-step SNN改为了层优先step-by-step。
+
+`snn_inference_TTFS_layer_prefix.cu`实现了VD-TTFS。
+
+`snn_inference_TTFS_layer_prefix_statistics.cu`在实现VD-TTFS的基础上统计出论文所需的统计值。
