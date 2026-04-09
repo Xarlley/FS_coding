@@ -7,3 +7,8 @@ __pycache__/
 cuda_assets/
 datasets/
 snn_inference
+snn_inference_TTFS
+snn_inference_TTFS_layer
+snn_inference_TTFS_layer_prefix
+snn_inference_TTFS_layer_prefix_statistics
+snn_inference_single
